@@ -1,95 +1,84 @@
-import telegram
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
-from pytube import YouTube
-from moviepy.editor import *  # Para la conversión de video a audio
 import os
 import re
+import tempfile
+import subprocess
+import logging
+import shutil
 
-# --- TOKEN DEL BOT DE TELEGRAM ---
-# Reemplaza 'YOUR_TELEGRAM_BOT_TOKEN' con el token que te proporciona BotFather
-TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
-# --- FIN DEL TOKEN DEL BOT ---
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+import yt_dlp
 
-def start(update, context):
-    """Comando /start para iniciar el bot."""
-    update.message.reply_text('¡Hola! Envíame un enlace de YouTube y lo convertiré a MP3.')
+# Insert your Telegram bot token here
+TOKEN = "YOUR_BOT_TOKEN"
 
-def help_command(update, context):
-    """Comando /help para mostrar ayuda."""
-    update.message.reply_text('Envíame un enlace de YouTube y lo descargaré, convertiré a MP3 y te lo enviaré. Acepto enlaces de youtube.com y youtu.be.')
+async def start(update: Update, context: CallbackContext):
+    """Handler for the /start command."""
+    await update.message.reply_text(
+        "Hello! Send me a YouTube link, and I'll send you the audio in MP3 format."
+    )
 
-def download_youtube_audio(update, context):
-    """Descarga el video de YouTube, lo convierte a MP3 y lo envía al usuario."""
-    user_message = update.message.text
-    chat_id = update.message.chat_id
+async def process_video(update: Update, context: CallbackContext):
+    """Handler for processing YouTube links, downloading, and converting to MP3."""
+    text = update.message.text
+    pattern = r'https?://(?:www\.)?youtu(?:be\.com|\.be)/[^\s]+'
+    match = re.search(pattern, text)
+    if not match:
+        await update.message.reply_text("Please send a valid YouTube link.")
+        return
 
-    # Expresión regular para extraer la URL de YouTube, cubriendo ambos dominios
-    url_pattern = re.compile(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]+))')
-    match = url_pattern.search(user_message)
+    url = match.group(0)
+    await update.message.reply_text("Downloading and converting the video, please wait...")
 
-    if match:
-        youtube_url = match.group(1)
-        try:
-            yt = YouTube(youtube_url)
-            update.message.reply_text(f'Descargando audio de: {yt.title}...')
+    temp_dir = tempfile.mkdtemp()
 
-            # Obtener el stream de audio de mayor calidad disponible en formato MP4 (o similar progresivo)
-            audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+    try:
+        ydl_opts = {
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'restrictfilenames': True,
+            'format': 'bestaudio/best',
+            'noplaylist': True,
+        }
 
-            if audio_stream:
-                video_filename = audio_stream.default_filename
-                video_path = audio_stream.download(filename=video_filename) # Descarga el archivo con el nombre original
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
 
-                # Convertir a MP3 usando MoviePy
-                mp3_filename = os.path.splitext(video_filename)[0] + ".mp3" # Cambia la extensión a .mp3
-                mp3_path = os.path.splitext(video_path)[0] + ".mp3" # Mismo path base pero con extensión .mp3
-                try:
-                    videoclip = VideoFileClip(video_path)
-                    videoclip.audio.write_audiofile(mp3_path, codec='libmp3lame') # Especificamos codec para MP3
-                    videoclip.close() # Cierra el clip de video para liberar recursos
+        downloaded_files = [f for f in os.listdir(temp_dir) if not f.endswith('.info.json')]
+        if not downloaded_files:
+            await update.message.reply_text("Failed to download the video.")
+            return
 
-                    # Enviar el archivo MP3 al usuario
-                    with open(mp3_path, 'rb') as audio_file:
-                        context.bot.send_audio(chat_id=chat_id, audio=audio_file, title=mp3_filename)
+        video_filename = downloaded_files[0]
+        video_filepath = os.path.join(temp_dir, video_filename)
+        base_name = os.path.splitext(video_filename)[0]
+        mp3_filename = f"{base_name}.mp3"
+        mp3_filepath = os.path.join(temp_dir, mp3_filename)
 
-                    update.message.reply_text('¡Audio MP3 enviado! Limpiando archivos temporales...')
+        cmd = [
+            'ffmpeg', '-y', '-i', video_filepath, '-vn',
+            '-ar', '44100', '-ac', '2', '-b:a', '192k', mp3_filepath
+        ]
+        subprocess.run(cmd, check=True)
 
-                    # Borrar archivos de video y audio
-                    os.remove(video_path)
-                    os.remove(mp3_path)
-                    update.message.reply_text('Archivos temporales borrados.')
+        with open(mp3_filepath, 'rb') as audio_file:
+            await update.message.reply_audio(audio_file, title=base_name)
 
-                except Exception as conversion_error:
-                    update.message.reply_text(f'Error al convertir a MP3: {conversion_error}')
-                    return # Importante salir si hay un error en la conversión para evitar borrar archivos no deseados
-
-            else:
-                update.message.reply_text('No se encontró un stream de audio adecuado para este video.')
-
-        except Exception as download_error:
-            update.message.reply_text(f'Error al descargar el video de YouTube: {download_error}')
-    else:
-        update.message.reply_text('Por favor, envíe un enlace de YouTube válido.')
-
+    except Exception as e:
+        logging.exception("Error processing the video:")
+        await update.message.reply_text("An error occurred while processing the video.")
+    finally:
+        shutil.rmtree(temp_dir)
 
 def main():
-    """Inicia el bot y lo mantiene en funcionamiento."""
-    updater = Updater(TOKEN, use_context=True)
+    """Bot entry point."""
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-    dp = updater.dispatcher
+    app = Application.builder().token(TOKEN).build()
 
-    # Comandos
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_video))
 
-    # Manejador de mensajes de texto (donde se espera la URL de YouTube)
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, download_youtube_audio))
-
-    # Iniciar el bot
-    updater.start_polling()
-
-    # Mantener el bot funcionando hasta que se detenga manualmente
-    updater.idle()
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
