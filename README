@@ -1,0 +1,48 @@
+# Awesome Scripts Repository
+
+Welcome to the Awesome Scripts Repository!
+
+This repository is a curated collection of scripts designed to automate tasks, simplify workflows, and provide handy tools for various needs.  The main goal is to create a centralized hub where you can discover and share small programs that streamline your daily activities, whether related to multimedia, productivity, internet tasks, or any other area benefiting from code automation.
+
+Each script in this repository is crafted to be **user-friendly**, **well-documented**, and **adaptable** to different environments and requirements. We strive to maintain clean, efficient code with robust error handling to ensure reliability.
+
+## List of Included Scripts
+
+Below is a list of the scripts currently available in this repository, along with a brief description of each script's functionality. This list will be updated as new scripts are added.
+
+1.  **file-sender**
+
+    *   **Description:** This script implements a Telegram bot that allows users to download audio from YouTube videos and receive it as an MP3 file. The bot accepts YouTube links in both `youtube.com` and `youtu.be` formats.
+    *   **Key Features:**
+        *   Downloads audio from YouTube videos using user-provided links.
+        *   Converts the downloaded audio to MP3 format.
+        *   Sends the MP3 file back to the user via a Telegram message.
+        *   Handles both standard `youtube.com` and shortened `youtu.be` YouTube links.
+        *   Robust handling of filenames, including those with special characters.
+        *   Automatic cleanup of temporary files (video and audio) after successful MP3 delivery.
+        *   `/start` and `/help` commands for easy bot interaction.
+
+## Future Scripts
+
+This repository is continuously growing. If you have ideas for scripts you'd like to see implemented in this repository, or if you wish to contribute your own scripts, you are very welcome!
+
+## How to Use the Scripts
+
+To use the scripts in this repository, you will generally follow these steps:
+
+1.  **Clone the repository:** Clone this repository to your local machine using `git clone https://github.com/javierh/awesome-scripts.git`.
+2.  **Install dependencies:** Each script might have its own dependencies. Typically, you'll find a `requirements.txt` file in the script's directory. Use `pip install -r requirements.txt` to install the necessary dependencies.
+3.  **Configure the script:** Some scripts will require configuration, such as API tokens, keys, file paths, etc. Read the specific documentation within each script directory to understand how to configure it.
+4.  **Run the script:** Execute the script using `python3 script_name.py`. Refer to the script's documentation for instructions on how to interact with it (commands, arguments, etc.).
+
+## Contributions
+
+Contributions are welcome! If you'd like to contribute to this repository, whether by adding new scripts, improving existing ones, fixing bugs, or enhancing documentation, please feel free to do so. You can open an "Issue" to propose changes or directly submit a "Pull Request".
+
+## License
+
+https://github.com/javierh/awesome-scripts/blob/main/LICENSE
+
+---
+
+We hope you find these scripts useful! If you have any questions or suggestions, please don't hesitate to contact me.
