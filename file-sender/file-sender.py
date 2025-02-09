@@ -1,98 +1,95 @@
-#!/usr/bin/env python3
-
-import time
-import os
 import telegram
-from telegram.constants import ParseMode
-import threading
-import asyncio
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from pytube import YouTube
+from moviepy.editor import *  # Para la conversión de video a audio
+import os
 import re
-import yt_dlp
-from telegram.ext import Application, MessageHandler, filters
 
-# --- CONFIGURATION ---
-MONITOR_FOLDER_PATH = "/mnt/data/music"
-TELEGRAM_BOT_TOKEN = "518820532:AAGdCnVv8HR8dapzjDLsivCtIJ3onXteq8g"
-TELEGRAM_CHAT_ID = "135572121"
-INTERVAL_SECONDS = 10
-WAIT_SECONDS_FOR_SIZE_CHECK = 60
-ALLOWED_EXTENSIONS = {".mp3", ".flac", ".aac", ".wav", ".ogg", ".m4a"}
-YOUTUBE_DOWNLOAD_PATH = "/tmp"
-# --- END CONFIGURATION ---
+# --- TOKEN DEL BOT DE TELEGRAM ---
+# Reemplaza 'YOUR_TELEGRAM_BOT_TOKEN' con el token que te proporciona BotFather
+TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+# --- FIN DEL TOKEN DEL BOT ---
 
-def is_audio_file(filename):
-    _, ext = os.path.splitext(filename)
-    return ext.lower() in ALLOWED_EXTENSIONS
+def start(update, context):
+    """Comando /start para iniciar el bot."""
+    update.message.reply_text('¡Hola! Envíame un enlace de YouTube y lo convertiré a MP3.')
 
-async def send_telegram_file(bot, chat_id, file_path):
-    """Sends a file to a Telegram chat asynchronously."""
-    try:
-        with open(file_path, 'rb') as file:
-            await bot.send_document(chat_id=chat_id, document=file)
-        print(f"Fichero '{os.path.basename(file_path)}' enviado a chat ID: {chat_id}")
-    except Exception as e:
-        print(f"Error al enviar fichero '{os.path.basename(file_path)}' a chat ID: {chat_id}. Error: {e}")
+def help_command(update, context):
+    """Comando /help para mostrar ayuda."""
+    update.message.reply_text('Envíame un enlace de YouTube y lo descargaré, convertiré a MP3 y te lo enviaré. Acepto enlaces de youtube.com y youtu.be.')
 
-def download_youtube_as_mp3(youtube_url):
-    """Downloads a YouTube video as MP3 using yt-dlp and returns the path to the downloaded file."""
-    try:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': os.path.join(YOUTUBE_DOWNLOAD_PATH, '%(title)s.%(ext)s'),
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(youtube_url, download=True)
-            video_title = info_dict.get('title', None)
-            if video_title:
-                mp3_filename = f"{video_title}.mp3"
-                mp3_filepath = os.path.join(YOUTUBE_DOWNLOAD_PATH, mp3_filename)
+def download_youtube_audio(update, context):
+    """Descarga el video de YouTube, lo convierte a MP3 y lo envía al usuario."""
+    user_message = update.message.text
+    chat_id = update.message.chat_id
 
-                if os.path.exists(mp3_filepath):
-                    print(f"MP3 creado: {mp3_filepath}")
-                    return mp3_filepath
-                else:
-                    print(f"Error: No se encontró el archivo MP3 después de la conversión: {mp3_filepath}")
-                    return None
+    # Expresión regular para extraer la URL de YouTube, cubriendo ambos dominios
+    url_pattern = re.compile(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]+))')
+    match = url_pattern.search(user_message)
+
+    if match:
+        youtube_url = match.group(1)
+        try:
+            yt = YouTube(youtube_url)
+            update.message.reply_text(f'Descargando audio de: {yt.title}...')
+
+            # Obtener el stream de audio de mayor calidad disponible en formato MP4 (o similar progresivo)
+            audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+
+            if audio_stream:
+                video_filename = audio_stream.default_filename
+                video_path = audio_stream.download(filename=video_filename) # Descarga el archivo con el nombre original
+
+                # Convertir a MP3 usando MoviePy
+                mp3_filename = os.path.splitext(video_filename)[0] + ".mp3" # Cambia la extensión a .mp3
+                mp3_path = os.path.splitext(video_path)[0] + ".mp3" # Mismo path base pero con extensión .mp3
+                try:
+                    videoclip = VideoFileClip(video_path)
+                    videoclip.audio.write_audiofile(mp3_path, codec='libmp3lame') # Especificamos codec para MP3
+                    videoclip.close() # Cierra el clip de video para liberar recursos
+
+                    # Enviar el archivo MP3 al usuario
+                    with open(mp3_path, 'rb') as audio_file:
+                        context.bot.send_audio(chat_id=chat_id, audio=audio_file, title=mp3_filename)
+
+                    update.message.reply_text('¡Audio MP3 enviado! Limpiando archivos temporales...')
+
+                    # Borrar archivos de video y audio
+                    os.remove(video_path)
+                    os.remove(mp3_path)
+                    update.message.reply_text('Archivos temporales borrados.')
+
+                except Exception as conversion_error:
+                    update.message.reply_text(f'Error al convertir a MP3: {conversion_error}')
+                    return # Importante salir si hay un error en la conversión para evitar borrar archivos no deseados
+
             else:
-                print(f"Error: No se pudo obtener el título del video de YouTube para URL: {youtube_url}")
-                return None
-    except Exception as e:
-        print(f"Error al descargar y convertir video de YouTube desde URL: {youtube_url}. Error: {e}")
-        return None
+                update.message.reply_text('No se encontró un stream de audio adecuado para este video.')
 
-async def telegram_message_handler(update, context):
-    """Handles Telegram messages, looks for YouTube URLs, downloads them as MP3, and sends them back to the user."""
-    message_text = update.message.text
-    youtube_url_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]+))', message_text)
-
-    if youtube_url_match:
-        youtube_url = youtube_url_match.group(1)
-        user_chat_id = update.message.chat_id
-        print(f"URL de YouTube detectada del usuario {user_chat_id}: {youtube_url}")
-
-        mp3_filepath = download_youtube_as_mp3(youtube_url)
-        if mp3_filepath:
-            await send_telegram_file(context.bot, user_chat_id, mp3_filepath)
-        else:
-            await context.bot.send_message(chat_id=user_chat_id, text="Error al descargar y convertir el video de YouTube.")
+        except Exception as download_error:
+            update.message.reply_text(f'Error al descargar el video de YouTube: {download_error}')
     else:
-        print(f"Mensaje recibido del usuario {update.message.chat_id}, pero no es una URL de YouTube.")
+        update.message.reply_text('Por favor, envíe un enlace de YouTube válido.')
+
 
 def main():
-    """Main function to set up the bot."""
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
-    youtube_url_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, telegram_message_handler)
-    app.add_handler(youtube_url_handler)
+    """Inicia el bot y lo mantiene en funcionamiento."""
+    updater = Updater(TOKEN, use_context=True)
 
-    print("Bot de Telegram inicializado y escuchando mensajes...")
+    dp = updater.dispatcher
 
-    app.run_polling(drop_pending_updates=True)
+    # Comandos
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("help", help_command))
 
-if __name__ == "__main__":
+    # Manejador de mensajes de texto (donde se espera la URL de YouTube)
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, download_youtube_audio))
+
+    # Iniciar el bot
+    updater.start_polling()
+
+    # Mantener el bot funcionando hasta que se detenga manualmente
+    updater.idle()
+
+if __name__ == '__main__':
     main()
